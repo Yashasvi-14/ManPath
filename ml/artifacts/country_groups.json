@@ -1,0 +1,16 @@
+{
+  "top_countries": [
+    "Other",
+    "India",
+    "USA",
+    "Canada",
+    "Australia",
+    "UK",
+    "Germany",
+    "Mexico",
+    "Turkey",
+    "France",
+    "Spain"
+  ],
+  "fallback_country": "Other"
+}
