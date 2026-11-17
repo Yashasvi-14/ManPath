@@ -1,6 +1,7 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.main import app
+from app.core.database import get_db
 
 client = TestClient(app)
 
@@ -27,6 +29,20 @@ VALID_INPUT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def override_database():
+    mock_db = MagicMock()
+
+    def override_get_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    yield mock_db
+
+    app.dependency_overrides.clear()
+
+
 def test_root_endpoint():
     response = client.get("/")
     assert response.status_code == 200
@@ -38,7 +54,11 @@ def test_health_endpoint():
     assert response.status_code == 200
 
 
-def test_valid_prediction():
+@patch("app.api.predictions.save_assessment")
+def test_valid_prediction_saves_assessment(
+    mock_save,
+    override_database,
+):
     response = client.post("/predict", json=VALID_INPUT)
 
     assert response.status_code == 200
@@ -47,22 +67,35 @@ def test_valid_prediction():
     assert isinstance(result["predicted_score"], float)
     assert result["model"] == "RandomForestRegressor"
 
+    mock_save.assert_called_once()
 
-def test_unknown_country():
+    kwargs = mock_save.call_args.kwargs
+
+    assert kwargs["db"] is override_database
+    assert kwargs["input_data"] == VALID_INPUT
+    assert isinstance(kwargs["predicted_score"], float)
+    assert kwargs["model_version"] == "rf-student-mental-health-v1"
+
+
+@patch("app.api.predictions.save_assessment")
+def test_unknown_country(mock_save):
     payload = {**VALID_INPUT, "Country": "Japan"}
 
     response = client.post("/predict", json=payload)
 
     assert response.status_code == 200
     assert isinstance(response.json()["predicted_score"], float)
+    mock_save.assert_called_once()
 
 
-def test_invalid_stress_level():
+@patch("app.api.predictions.save_assessment")
+def test_invalid_stress_level_does_not_save(mock_save):
     payload = {**VALID_INPUT, "Stress_Level": "Extreme"}
 
     response = client.post("/predict", json=payload)
 
     assert response.status_code == 422
+    mock_save.assert_not_called()
 
 
 def test_missing_field():
@@ -80,3 +113,19 @@ def test_extra_field():
     response = client.post("/predict", json=payload)
 
     assert response.status_code == 422
+
+
+@patch("app.api.predictions.save_assessment")
+def test_database_failure_does_not_return_success(
+    mock_save,
+):
+    mock_save.side_effect = RuntimeError("Database unavailable")
+
+    test_client = TestClient(
+        app,
+        raise_server_exceptions=False,
+    )
+
+    response = test_client.post("/predict", json=VALID_INPUT)
+
+    assert response.status_code == 500
