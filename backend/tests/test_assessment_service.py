@@ -39,3 +39,26 @@ def test_save_assessment_rolls_back_on_failure():
         )
 
     db.rollback.assert_called_once()
+
+
+def test_get_assessments_orders_newest_first():
+    from sqlalchemy.dialects import postgresql
+
+    from app.services.assessment_service import get_assessments
+
+    db = MagicMock()
+    db.scalars.return_value.all.return_value = []
+
+    get_assessments(db=db, skip=10, limit=5)
+
+    statement = db.scalars.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+
+    sql = str(compiled)
+
+    assert (
+        "ORDER BY assessments.created_at DESC, assessments.id DESC"
+        in sql
+    )
+    assert compiled.params["param_1"] == 5
+    assert compiled.params["param_2"] == 10
