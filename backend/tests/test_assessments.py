@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from uuid import UUID, uuid4
+from uuid import uuid4
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,17 +13,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.main import app
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 
 
 @pytest.fixture
 def mock_db():
     db = MagicMock()
+    test_user = SimpleNamespace(
+        id=uuid4(),
+        is_active=True,
+    )
 
     def override_get_db():
         yield db
 
+    def override_get_current_user():
+        return test_user
+
     app.dependency_overrides[get_db] = override_get_db
-    yield db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    yield db, test_user
+
     app.dependency_overrides.clear()
 
 
@@ -38,93 +49,97 @@ def sample_assessment():
     )
 
 
-def test_list_assessments(
-    mock_db,
-    sample_assessment,
-    monkeypatch,
-):
+def test_list_assessments(mock_db, sample_assessment, monkeypatch):
     from app.api import assessments
 
+    db, user = mock_db
+    captured = {}
+
+    def fake_get_assessments(db, user_id, skip, limit):
+        captured["user_id"] = user_id
+        return [sample_assessment], 1
+
     monkeypatch.setattr(
-        assessments,
-        "get_assessments",
-        lambda db, skip, limit: [sample_assessment],
+        assessments, "get_assessments", fake_get_assessments
     )
-    mock_db.scalar.return_value = 1
 
     client = TestClient(app)
-    response = client.get("/assessments")
+    response = client.get("/assessments/")
 
     assert response.status_code == 200
-
     result = response.json()
+
     assert result["total"] == 1
     assert result["skip"] == 0
     assert result["limit"] == 10
     assert len(result["assessments"]) == 1
     assert result["assessments"][0]["id"] == str(sample_assessment.id)
+    assert captured["user_id"] == user.id
 
 
-def test_assessment_pagination(
-    mock_db,
-    monkeypatch,
-):
+def test_assessment_pagination(mock_db, monkeypatch):
     from app.api import assessments
 
+    db, user = mock_db
     captured = {}
 
-    def fake_get_assessments(db, skip, limit):
-        captured["skip"] = skip
-        captured["limit"] = limit
-        return []
+    def fake_get_assessments(db, user_id, skip, limit):
+        captured.update(
+            user_id=user_id,
+            skip=skip,
+            limit=limit,
+        )
+        return [], 25
 
     monkeypatch.setattr(
-        assessments,
-        "get_assessments",
-        fake_get_assessments,
+        assessments, "get_assessments", fake_get_assessments
     )
-    mock_db.scalar.return_value = 25
 
     client = TestClient(app)
-    response = client.get("/assessments?skip=10&limit=5")
+    response = client.get("/assessments/?skip=10&limit=5")
 
     assert response.status_code == 200
-    assert captured == {"skip": 10, "limit": 5}
+    assert captured == {
+        "user_id": user.id,
+        "skip": 10,
+        "limit": 5,
+    }
     assert response.json()["total"] == 25
 
 
-def test_empty_assessment_history(
-    mock_db,
-    monkeypatch,
-):
+def test_empty_assessment_history(mock_db, monkeypatch):
     from app.api import assessments
 
+    def fake_get_assessments(db, user_id, skip, limit):
+        return [], 0
+
     monkeypatch.setattr(
-        assessments,
-        "get_assessments",
-        lambda db, skip, limit: [],
+        assessments, "get_assessments", fake_get_assessments
     )
-    mock_db.scalar.return_value = 0
 
     client = TestClient(app)
-    response = client.get("/assessments")
+    response = client.get("/assessments/")
 
     assert response.status_code == 200
     assert response.json()["assessments"] == []
     assert response.json()["total"] == 0
 
 
-def test_retrieve_assessment(
-    mock_db,
-    sample_assessment,
-    monkeypatch,
-):
+def test_retrieve_assessment(mock_db, sample_assessment, monkeypatch):
     from app.api import assessments
+
+    db, user = mock_db
+    captured = {}
+
+    def fake_get_assessment_by_id(db, assessment_id, user_id):
+        captured["assessment_id"] = assessment_id
+        captured["user_id"] = user_id
+        return sample_assessment
 
     monkeypatch.setattr(
         assessments,
         "get_assessment_by_id",
-        lambda db, assessment_id: sample_assessment,
+        fake_get_assessment_by_id,
     )
 
     client = TestClient(app)
@@ -135,24 +150,21 @@ def test_retrieve_assessment(
     assert response.status_code == 200
     assert response.json()["id"] == str(sample_assessment.id)
     assert response.json()["predicted_score"] == 6.079
+    assert captured["assessment_id"] == sample_assessment.id
+    assert captured["user_id"] == user.id
 
 
-def test_assessment_not_found(
-    mock_db,
-    monkeypatch,
-):
+def test_assessment_not_found(mock_db, monkeypatch):
     from app.api import assessments
 
     monkeypatch.setattr(
         assessments,
         "get_assessment_by_id",
-        lambda db, assessment_id: None,
+        lambda db, assessment_id, user_id: None,
     )
 
     client = TestClient(app)
-    response = client.get(
-        f"/assessments/{uuid4()}"
-    )
+    response = client.get(f"/assessments/{uuid4()}")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Assessment not found"
@@ -161,6 +173,6 @@ def test_assessment_not_found(
 def test_invalid_pagination_parameters(mock_db):
     client = TestClient(app)
 
-    response = client.get("/assessments?skip=-1")
+    response = client.get("/assessments/?skip=-1")
 
     assert response.status_code == 422

@@ -16,5 +16,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    frontend_url: str = "http://localhost:5173"
+
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+
 
 settings = Settings()

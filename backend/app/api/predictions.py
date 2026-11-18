@@ -9,6 +9,8 @@ from app.schemas.prediction import (
     PredictionResponse,
 )
 from app.services.assessment_service import save_assessment
+from app.core.dependencies import get_current_user
+from app.models.user import User
 
 router = APIRouter(prefix="/predict", tags=["Predictions"])
 
@@ -19,6 +21,7 @@ MODEL_VERSION = "rf-student-mental-health-v1"
 def predict_mental_health(
     request: PredictionRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         input_data = request.model_dump()
@@ -29,6 +32,7 @@ def predict_mental_health(
             input_data=input_data,
             predicted_score=score,
             model_version=MODEL_VERSION,
+            user_id=current_user.id,
         )
 
         return PredictionResponse(
