@@ -1,4 +1,5 @@
-
+import secrets
+import hashlib
 from pwdlib import PasswordHash
 from datetime import datetime, timedelta, timezone
 import jwt
@@ -51,3 +52,13 @@ def decode_access_token(token: str) -> dict | None:
 
     except jwt.InvalidTokenError:
         return None
+
+
+def generate_refresh_token() -> str:
+    """Generate a cryptographically secure opaque refresh token."""
+    return secrets.token_urlsafe(64)
+
+
+def hash_refresh_token(token: str) -> str:
+    """Return the SHA-256 hash of a refresh token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

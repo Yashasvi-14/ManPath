@@ -1,8 +1,6 @@
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
-from fastapi import HTTPException
 
 from app.core.database import get_db
 from app.schemas.auth import (
@@ -12,6 +10,13 @@ from app.schemas.auth import (
     VerifyEmailResponse,
     LoginRequest, 
     LoginResponse,
+    RefreshRequest,
+    LogoutRequest,
+)
+from app.services.token_service import (
+    create_refresh_token,
+    rotate_refresh_token,
+    revoke_refresh_token,
 )
 from app.core.security import create_access_token
 from app.services.auth_service import register_user, verify_email, authenticate_user
@@ -60,10 +65,48 @@ def login(
             detail="Invalid email or password",
         )
 
-    access_token = create_access_token(str(user.id))
+    try:
+        access_token = create_access_token(str(user.id))
+
+        refresh_token = create_refresh_token(
+            db=db,
+            user_id=user.id,
+        )
+
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
 
     return LoginResponse(
         access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+    )
+
+
+@router.post("/refresh", response_model=LoginResponse)
+def refresh(
+    request: RefreshRequest,
+    db: Session = Depends(get_db),
+):
+    tokens = rotate_refresh_token(
+        db=db,
+        raw_token=request.refresh_token,
+    )
+
+    if tokens is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid, expired, or revoked refresh token",
+        )
+
+    access_token, refresh_token = tokens
+
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
         token_type="bearer",
     )
 
@@ -90,3 +133,24 @@ def verify_email_endpoint(
     return VerifyEmailResponse(
         message="Email verified successfully",
     )
+
+
+@router.post("/logout")
+def logout(
+    request: LogoutRequest,
+    db: Session = Depends(get_db),
+):
+    revoked = revoke_refresh_token(
+        db=db,
+        raw_token=request.refresh_token,
+    )
+
+    if not revoked:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid refresh token",
+        )
+
+    return {
+        "message": "Logged out successfully"
+    }
