@@ -1,8 +1,8 @@
+
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.models.chat_message import ChatMessage
 from app.models.conversation import Conversation
@@ -17,11 +17,14 @@ def create_conversation(
         title="New conversation",
     )
 
-    db.add(conversation)
-    db.commit()
-    db.refresh(conversation)
-
-    return conversation
+    try:
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+        return conversation
+    except Exception:
+        db.rollback()
+        raise
 
 
 def get_user_conversations(
@@ -63,10 +66,14 @@ def delete_conversation(
     if conversation is None:
         return False
 
-    db.delete(conversation)
-    db.commit()
+    try:
+        db.delete(conversation)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
 
-    return True
 
 def save_message(
     db: Session,
@@ -90,13 +97,15 @@ def save_message(
         content=content,
     )
 
-    conversation.updated_at = func.now()
-
-    db.add(message)
-    db.commit()
-    db.refresh(message)
-
-    return message
+    try:
+        conversation.updated_at = func.now()
+        db.add(message)
+        db.commit()
+        db.refresh(message)
+        return message
+    except Exception:
+        db.rollback()
+        raise
 
 
 def get_conversation_messages(
