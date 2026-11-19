@@ -57,3 +57,4 @@ websockets==17.4
 google-auth==2.62.2
 requests==2.34.2
 shap==0.54.1
+google-genai==3.6.1

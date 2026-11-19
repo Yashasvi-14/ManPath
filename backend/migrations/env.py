@@ -6,8 +6,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.core.database import Base
-from app.models.assessment import Assessment
-
+import app.models
 # Import models here as they are created.
 # This ensures their tables are registered with Base.metadata.
 

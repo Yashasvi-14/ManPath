@@ -25,4 +25,7 @@ class Settings(BaseSettings):
 
     google_client_id: str | None = None
 
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.8-flash"
+
 settings = Settings()
