@@ -37,6 +37,13 @@ class PredictionRequest(BaseModel):
     Country: str = Field(min_length=1, max_length=100)
 
 
+class FeatureContribution(BaseModel):
+    feature: str
+    contribution: float
+
+
 class PredictionResponse(BaseModel):
     predicted_score: float
+    baseline_score: float
+    feature_contributions: list[FeatureContribution]
     model: str = "RandomForestRegressor"

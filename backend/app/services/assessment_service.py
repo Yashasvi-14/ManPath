@@ -13,12 +13,14 @@ def save_assessment(
     predicted_score: float,
     model_version: str,
     user_id: UUID,
+    explanation: dict | None = None,
 ):
     assessment = Assessment(
         input_data=input_data,
         predicted_score=predicted_score,
         model_version=model_version,
         user_id=user_id,
+        explanation=explanation,
     )
 
     try:

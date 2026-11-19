@@ -35,6 +35,11 @@ class Assessment(Base):
         nullable=False,
     )
 
+    explanation: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
     model_version: Mapped[str] = mapped_column(
         String(100),
         nullable=False,

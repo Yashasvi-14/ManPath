@@ -2,7 +2,7 @@
 import json
 import math
 from pathlib import Path
-
+import shap
 import joblib
 import pandas as pd
 
@@ -23,6 +23,11 @@ class ModelPredictor:
             )
 
         self.model = joblib.load(MODEL_PATH)
+
+        self.preprocessor = self.model.named_steps["preprocessor"]
+        self.estimator = self.model.named_steps["random forest"]
+
+        self.explainer = shap.TreeExplainer(self.estimator)
 
         with open(COUNTRY_CONFIG_PATH, encoding="utf-8") as file:
             country_config = json.load(file)
@@ -113,5 +118,107 @@ class ModelPredictor:
         prediction = self.model.predict(input_frame)[0]
 
         return float(prediction)
+
+
+    def explain(self, input_data: dict) -> dict:
+        """Explain a prediction using SHAP values."""
+
+        # Reuse the existing validation and country grouping.
+        self.predict(input_data)
+
+        row = {
+            feature: input_data[feature]
+            for feature in self.feature_names
+            if feature != "Grouped_country"
+        }
+
+        country = input_data["Country"]
+
+        grouped_country = (
+            country if country in self.top_countries
+            else self.fallback_country
+        )
+
+        row["Grouped_country"] = grouped_country
+
+        input_frame = pd.DataFrame(
+            [row],
+            columns=self.feature_names
+        )
+
+        # Apply the exact fitted preprocessing pipeline.
+        transformed = self.preprocessor.transform(input_frame)
+
+        # Calculate SHAP contributions.
+        shap_values = self.explainer.shap_values(transformed)
+
+        contributions = shap_values[0]
+
+        # Map transformed columns to their original features.
+        feature_mapping = []
+
+        for name, _, columns in self.preprocessor.transformers_:
+            if name == "Skewed_Pipeline":
+                feature_mapping.extend(columns)
+
+            elif name == "Plain_Numeric":
+                feature_mapping.extend(columns)
+
+            elif name == "Ordinal":
+                feature_mapping.extend(columns)
+
+            elif name == "Normal":
+                encoder = (
+                    self.preprocessor.named_transformers_["Normal"]
+                    .named_steps["encode"]
+                )
+
+                feature_mapping.extend(
+                    encoder.get_feature_names_out(columns)
+                )
+
+        # Aggregate one-hot encoded contributions.
+        aggregated = {}
+
+        for feature, value in zip(feature_mapping, contributions):
+            original_feature = feature.split("_")[0] if feature.startswith(
+                ("Gender_", "Academic_Level_", "Most_Used_Platform_",
+                 "Purpose_Of_Use_", "Grouped_country_")
+            ) else feature
+
+            if feature.startswith("Academic_Level_"):
+                original_feature = "Academic_Level"
+            elif feature.startswith("Most_Used_Platform_"):
+                original_feature = "Most_Used_Platform"
+            elif feature.startswith("Purpose_Of_Use_"):
+                original_feature = "Purpose_Of_Use"
+            elif feature.startswith("Grouped_country_"):
+                original_feature = "Grouped_country"
+            elif feature.startswith("Gender_"):
+                original_feature = "Gender"
+
+            aggregated[original_feature] = (
+                aggregated.get(original_feature, 0.0) + float(value)
+            )
+
+        sorted_contributions = sorted(
+            aggregated.items(),
+            key=lambda item: abs(item[1]),
+            reverse=True,
+        )
+
+        prediction = self.predict(input_data)
+
+        return {
+            "predicted_score": prediction,
+            "baseline_score": float(self.explainer.expected_value[0]),
+            "feature_contributions": [
+                {
+                    "feature": feature,
+                    "contribution": float(value),
+                }
+                for feature, value in sorted_contributions
+            ],
+        }
 
 predictor = ModelPredictor()

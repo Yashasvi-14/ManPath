@@ -25,7 +25,8 @@ def predict_mental_health(
 ):
     try:
         input_data = request.model_dump()
-        score = predictor.predict(input_data)
+        explanation = predictor.explain(input_data)
+        score = explanation["predicted_score"]
 
         save_assessment(
             db=db,
@@ -33,10 +34,13 @@ def predict_mental_health(
             predicted_score=score,
             model_version=MODEL_VERSION,
             user_id=current_user.id,
+            explanation=explanation,
         )
 
         return PredictionResponse(
-            predicted_score=round(score, 4)
+            predicted_score=round(score, 4),
+            baseline_score=explanation["baseline_score"],
+            feature_contributions=explanation["feature_contributions"],
         )
 
     except ValueError as error:
