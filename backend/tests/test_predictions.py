@@ -142,3 +142,51 @@ def test_database_failure_does_not_return_success(mock_save):
     response = test_client.post("/predict", json=VALID_INPUT)
 
     assert response.status_code == 500
+
+
+@patch("app.api.predictions.save_assessment")
+@patch("app.api.predictions.predictor.explain")
+def test_valid_simulation_does_not_save_assessment(
+    mock_explain,
+    mock_save,
+    override_dependencies,
+):
+    mock_explain.return_value = {
+        "predicted_score": 6.5,
+        "baseline_score": 6.0,
+        "feature_contributions": [],
+    }
+
+    response = client.post("/predict/simulate", json=VALID_INPUT)
+
+    assert response.status_code == 200
+
+    result = response.json()
+
+    assert result["hypothetical"] is True
+    assert result["predicted_score"] == 6.5
+    assert result["baseline_score"] == 6.0
+    assert result["score_difference"] == 0.5
+    assert result["model"] == "RandomForestRegressor"
+    assert "hypothetical model-based simulation" in result["interpretation"]
+
+    mock_explain.assert_called_once_with(VALID_INPUT)
+    mock_save.assert_not_called()
+
+
+@patch("app.api.predictions.save_assessment")
+def test_invalid_simulation_input_does_not_save(mock_save):
+    payload = {**VALID_INPUT, "Stress_Level": "Extreme"}
+
+    response = client.post("/predict/simulate", json=payload)
+
+    assert response.status_code == 422
+    mock_save.assert_not_called()
+
+
+def test_simulation_rejects_unauthenticated_request():
+    app.dependency_overrides.pop(get_current_user, None)
+
+    response = client.post("/predict/simulate", json=VALID_INPUT)
+
+    assert response.status_code == 401

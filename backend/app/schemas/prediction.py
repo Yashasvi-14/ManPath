@@ -47,3 +47,12 @@ class PredictionResponse(BaseModel):
     baseline_score: float
     feature_contributions: list[FeatureContribution]
     model: str = "RandomForestRegressor"
+
+
+class SimulationResponse(BaseModel):
+    hypothetical: bool = True
+    predicted_score: float
+    baseline_score: float
+    score_difference: float
+    interpretation: str
+    model: str = "RandomForestRegressor"
