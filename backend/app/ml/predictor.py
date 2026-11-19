@@ -2,9 +2,11 @@
 import json
 import math
 from pathlib import Path
-import shap
+
 import joblib
+import numpy as np
 import pandas as pd
+import shap
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -41,6 +43,7 @@ class ModelPredictor:
 
     def _load_categories(self):
         """Read valid categorical values from the trained encoders."""
+
         preprocessor = self.model.named_steps["preprocessor"]
 
         ordinal_pipeline = preprocessor.named_transformers_["Ordinal"]
@@ -60,8 +63,6 @@ class ModelPredictor:
         ):
             self.valid_categories[column] = set(categories)
 
-
-    
     def _build_feature_mapping(self) -> list[str]:
         """Map transformed model features to their original input features."""
 
@@ -89,9 +90,36 @@ class ModelPredictor:
                         ),
                         encoded_name,
                     )
+
                     mapping.append(original_feature)
 
         return mapping
+
+    def _prepare_input(self, input_data: dict) -> pd.DataFrame:
+        """Prepare raw input data for the trained model."""
+
+        country = input_data["Country"]
+
+        if not isinstance(country, str) or not country.strip():
+            raise ValueError("Country must be a non-empty string")
+
+        grouped_country = (
+            country if country in self.top_countries
+            else self.fallback_country
+        )
+
+        row = {
+            feature: input_data[feature]
+            for feature in self.feature_names
+            if feature != "Grouped_country"
+        }
+
+        row["Grouped_country"] = grouped_country
+
+        return pd.DataFrame(
+            [row],
+            columns=self.feature_names,
+        )
 
     def predict(self, input_data: dict) -> float:
         """Generate a prediction from raw user input."""
@@ -124,58 +152,21 @@ class ModelPredictor:
             if input_data[column] not in categories:
                 raise ValueError(f"Invalid {column}")
 
-        country = input_data["Country"]
+        input_frame = self._prepare_input(input_data)
 
-        if not isinstance(country, str) or not country.strip():
-            raise ValueError("Country must be a non-empty string")
+        prediction = float(self.model.predict(input_frame)[0])
 
-        grouped_country = (
-            country if country in self.top_countries
-            else self.fallback_country
-        )
+        return prediction
 
-        row = {
-            feature: input_data[feature]
-            for feature in self.feature_names
-            if feature != "Grouped_country"
-        }
-
-        row["Grouped_country"] = grouped_country
-
-        input_frame = pd.DataFrame(
-            [row],
-            columns=self.feature_names
-        )
-
-        prediction = self.model.predict(input_frame)[0]
-
-        return float(prediction)
-
-
-    
     def explain(self, input_data: dict) -> dict:
         """Explain a prediction using SHAP values."""
 
-        # Validate input and prepare the prediction row.
         prediction = self.predict(input_data)
 
-        country = input_data["Country"]
-        grouped_country = (
-            country if country in self.top_countries
-            else self.fallback_country
-        )
+        if not math.isfinite(prediction):
+            raise RuntimeError("Model produced a non-finite prediction.")
 
-        row = {
-            feature: input_data[feature]
-            for feature in self.feature_names
-            if feature != "Grouped_country"
-        }
-        row["Grouped_country"] = grouped_country
-
-        input_frame = pd.DataFrame(
-            [row],
-            columns=self.feature_names
-        )
+        input_frame = self._prepare_input(input_data)
 
         # Apply the fitted preprocessing pipeline.
         transformed = self.preprocessor.transform(input_frame)
@@ -183,6 +174,9 @@ class ModelPredictor:
         # Calculate SHAP contributions.
         shap_values = self.explainer.shap_values(transformed)
         contributions = shap_values[0]
+
+        if not np.all(np.isfinite(contributions)):
+            raise RuntimeError("SHAP produced non-finite contributions.")
 
         # Map transformed features to original input features.
         feature_mapping = self._build_feature_mapping()
@@ -201,7 +195,13 @@ class ModelPredictor:
             reverse=True,
         )
 
-        baseline = float(self.explainer.expected_value[0])
+        # Extract a scalar baseline safely.
+        baseline = float(
+            np.asarray(self.explainer.expected_value).reshape(-1)[0]
+        )
+
+        if not math.isfinite(baseline):
+            raise RuntimeError("SHAP produced a non-finite baseline.")
 
         return {
             "predicted_score": prediction,
