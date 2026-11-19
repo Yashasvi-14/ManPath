@@ -63,6 +63,13 @@ class User(Base):
         back_populates="user",
     )
 
+    conversations = relationship(
+        "Conversation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     email_verification_tokens = relationship(
         "EmailVerificationToken",
         back_populates="user",
