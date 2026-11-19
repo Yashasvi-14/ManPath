@@ -1,3 +1,4 @@
+
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -27,23 +28,30 @@ def build_chat_context(
             ),
             "assessment_count": 0,
             "latest_assessment": None,
+            "assessment_history": [],
             "analytics": None,
         }
 
     latest = assessments[-1]
+
+    assessment_history = [
+        {
+            "id": str(assessment.id),
+            "created_at": assessment.created_at.isoformat(),
+            "input_data": assessment.input_data,
+            "predicted_score": assessment.predicted_score,
+            "model_version": assessment.model_version,
+            "explanation": assessment.explanation,
+        }
+        for assessment in assessments
+    ]
 
     analytics = build_analytics_overview(db, user_id)
 
     return {
         "has_assessments": True,
         "assessment_count": len(assessments),
-        "latest_assessment": {
-            "id": str(latest.id),
-            "created_at": latest.created_at.isoformat(),
-            "input_data": latest.input_data,
-            "predicted_score": latest.predicted_score,
-            "model_version": latest.model_version,
-            "explanation": latest.explanation,
-        },
+        "latest_assessment": assessment_history[-1],
+        "assessment_history": assessment_history,
         "analytics": analytics,
     }
