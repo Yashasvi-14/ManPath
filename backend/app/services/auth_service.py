@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.email_verification_token import EmailVerificationToken
 from app.services.email_service import send_verification_email
 
+from app.models.auth_identity import AuthIdentity
 
 VERIFICATION_TOKEN_EXPIRY_MINUTES = 30
 
@@ -137,3 +138,61 @@ def verify_email(db: Session, raw_token: str) -> bool:
         db.rollback()
         raise
 
+
+def authenticate_google_user(
+    db: Session,
+    google_info: dict,
+) -> User:
+    google_sub = google_info["sub"]
+    email = google_info["email"].strip().lower()
+    full_name = google_info.get("name") or email.split("@")[0]
+
+    # 1. Check whether this Google identity already exists.
+    identity = db.scalar(
+        select(AuthIdentity).where(
+            AuthIdentity.provider == "google",
+            AuthIdentity.provider_subject == google_sub,
+        )
+    )
+
+    if identity:
+        return identity.user
+
+    # 2. Check whether a ManPath account already uses this email.
+    user = db.scalar(
+        select(User).where(User.email == email)
+    )
+
+    now = datetime.now(timezone.utc)
+
+    if user:
+        # Google has verified ownership of this email.
+        user.is_active = True
+
+        if user.email_verified_at is None:
+            user.email_verified_at = now
+
+    else:
+        # 3. Create a new Google-authenticated user.
+        user = User(
+            email=email,
+            full_name=full_name,
+            hashed_password=None,
+            is_active=True,
+            email_verified_at=now,
+        )
+        db.add(user)
+        db.flush()
+
+    # 4. Link the Google identity to the ManPath account.
+    identity = AuthIdentity(
+        user_id=user.id,
+        provider="google",
+        provider_subject=google_sub,
+        provider_email=email,
+    )
+
+    db.add(identity)
+    db.flush()
+
+    return user

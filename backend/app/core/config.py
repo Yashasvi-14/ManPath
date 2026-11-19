@@ -23,4 +23,6 @@ class Settings(BaseSettings):
 
     refresh_token_expire_days: int = 30
 
+    google_client_id: str | None = None
+
 settings = Settings()

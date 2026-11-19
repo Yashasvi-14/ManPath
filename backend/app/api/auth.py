@@ -21,6 +21,10 @@ from app.services.token_service import (
 from app.core.security import create_access_token
 from app.services.auth_service import register_user, verify_email, authenticate_user
 
+from app.schemas.auth import GoogleLoginRequest
+from app.services.google_auth_service import verify_google_id_token
+from app.services.auth_service import authenticate_google_user
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
@@ -66,6 +70,47 @@ def login(
         )
 
     try:
+        access_token = create_access_token(str(user.id))
+
+        refresh_token = create_refresh_token(
+            db=db,
+            user_id=user.id,
+        )
+
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+    )
+
+@router.post("/google", response_model=LoginResponse)
+def google_login(
+    request: GoogleLoginRequest,
+    db: Session = Depends(get_db),
+):
+    # Step 1: Verify Google's ID token.
+    google_info = verify_google_id_token(request.id_token)
+
+    if google_info is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Google ID token",
+        )
+
+    try:
+        # Step 2: Find or create the ManPath user.
+        user = authenticate_google_user(
+            db=db,
+            google_info=google_info,
+        )
+
+        # Step 3: Generate ManPath's own tokens.
         access_token = create_access_token(str(user.id))
 
         refresh_token = create_refresh_token(

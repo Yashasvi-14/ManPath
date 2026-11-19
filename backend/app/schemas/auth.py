@@ -60,3 +60,6 @@ class LogoutRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     refresh_token: str = Field(min_length=20, max_length=200)
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=1)
