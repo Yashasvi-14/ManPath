@@ -1,8 +1,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class PredictionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -35,7 +34,15 @@ class PredictionRequest(BaseModel):
     ]
 
     Country: str = Field(min_length=1, max_length=100)
+    @field_validator("Country")
+    @classmethod
+    def normalize_country(cls, value: str) -> str:
+        value = value.strip()
 
+        if not value:
+            raise ValueError("Country cannot be empty.")
+
+        return value
 
 class FeatureContribution(BaseModel):
     feature: str

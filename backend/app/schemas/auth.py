@@ -8,15 +8,21 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=12, max_length=128)
     full_name: str = Field(min_length=2, max_length=150)
 
+    @field_validator("full_name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Full name cannot be empty.")
+
+        return value
+    
     @field_validator("email")
     @classmethod
     def normalize_email(cls, value: str) -> str:
         return value.strip().lower()
 
-    @field_validator("full_name")
-    @classmethod
-    def normalize_name(cls, value: str) -> str:
-        return value.strip()
 
 
 class RegisterResponse(BaseModel):
@@ -62,4 +68,6 @@ class LogoutRequest(BaseModel):
     refresh_token: str = Field(min_length=20, max_length=200)
 
 class GoogleLoginRequest(BaseModel):
-    id_token: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+    id_token: str = Field(min_length=1, max_length=10000)

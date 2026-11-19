@@ -9,7 +9,8 @@ class ChatMessageRequest(BaseModel):
         min_length=1,
         max_length=10000,
     )
-
+    model_config = ConfigDict(extra="forbid")
+    
     @field_validator("content")
     @classmethod
     def validate_content(cls, value: str) -> str:
