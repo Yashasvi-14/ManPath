@@ -60,7 +60,39 @@ class ModelPredictor:
         ):
             self.valid_categories[column] = set(categories)
 
+
     
+    def _build_feature_mapping(self) -> list[str]:
+        """Map transformed model features to their original input features."""
+
+        mapping = []
+
+        for name, _, columns in self.preprocessor.transformers_:
+            if name in ("Skewed_Pipeline", "Plain_Numeric", "Ordinal"):
+                mapping.extend(columns)
+
+            elif name == "Normal":
+                encoder = (
+                    self.preprocessor
+                    .named_transformers_["Normal"]
+                    .named_steps["encode"]
+                )
+
+                encoded_names = encoder.get_feature_names_out(columns)
+
+                for encoded_name in encoded_names:
+                    original_feature = next(
+                        (
+                            column
+                            for column in columns
+                            if encoded_name.startswith(f"{column}_")
+                        ),
+                        encoded_name,
+                    )
+                    mapping.append(original_feature)
+
+        return mapping
+
     def predict(self, input_data: dict) -> float:
         """Generate a prediction from raw user input."""
 
@@ -120,25 +152,24 @@ class ModelPredictor:
         return float(prediction)
 
 
+    
     def explain(self, input_data: dict) -> dict:
         """Explain a prediction using SHAP values."""
 
-        # Reuse the existing validation and country grouping.
-        self.predict(input_data)
+        # Validate input and prepare the prediction row.
+        prediction = self.predict(input_data)
+
+        country = input_data["Country"]
+        grouped_country = (
+            country if country in self.top_countries
+            else self.fallback_country
+        )
 
         row = {
             feature: input_data[feature]
             for feature in self.feature_names
             if feature != "Grouped_country"
         }
-
-        country = input_data["Country"]
-
-        grouped_country = (
-            country if country in self.top_countries
-            else self.fallback_country
-        )
-
         row["Grouped_country"] = grouped_country
 
         input_frame = pd.DataFrame(
@@ -146,59 +177,22 @@ class ModelPredictor:
             columns=self.feature_names
         )
 
-        # Apply the exact fitted preprocessing pipeline.
+        # Apply the fitted preprocessing pipeline.
         transformed = self.preprocessor.transform(input_frame)
 
         # Calculate SHAP contributions.
         shap_values = self.explainer.shap_values(transformed)
-
         contributions = shap_values[0]
 
-        # Map transformed columns to their original features.
-        feature_mapping = []
-
-        for name, _, columns in self.preprocessor.transformers_:
-            if name == "Skewed_Pipeline":
-                feature_mapping.extend(columns)
-
-            elif name == "Plain_Numeric":
-                feature_mapping.extend(columns)
-
-            elif name == "Ordinal":
-                feature_mapping.extend(columns)
-
-            elif name == "Normal":
-                encoder = (
-                    self.preprocessor.named_transformers_["Normal"]
-                    .named_steps["encode"]
-                )
-
-                feature_mapping.extend(
-                    encoder.get_feature_names_out(columns)
-                )
+        # Map transformed features to original input features.
+        feature_mapping = self._build_feature_mapping()
 
         # Aggregate one-hot encoded contributions.
         aggregated = {}
 
         for feature, value in zip(feature_mapping, contributions):
-            original_feature = feature.split("_")[0] if feature.startswith(
-                ("Gender_", "Academic_Level_", "Most_Used_Platform_",
-                 "Purpose_Of_Use_", "Grouped_country_")
-            ) else feature
-
-            if feature.startswith("Academic_Level_"):
-                original_feature = "Academic_Level"
-            elif feature.startswith("Most_Used_Platform_"):
-                original_feature = "Most_Used_Platform"
-            elif feature.startswith("Purpose_Of_Use_"):
-                original_feature = "Purpose_Of_Use"
-            elif feature.startswith("Grouped_country_"):
-                original_feature = "Grouped_country"
-            elif feature.startswith("Gender_"):
-                original_feature = "Gender"
-
-            aggregated[original_feature] = (
-                aggregated.get(original_feature, 0.0) + float(value)
+            aggregated[feature] = (
+                aggregated.get(feature, 0.0) + float(value)
             )
 
         sorted_contributions = sorted(
@@ -207,18 +201,19 @@ class ModelPredictor:
             reverse=True,
         )
 
-        prediction = self.predict(input_data)
+        baseline = float(self.explainer.expected_value[0])
 
         return {
             "predicted_score": prediction,
-            "baseline_score": float(self.explainer.expected_value[0]),
+            "baseline_score": baseline,
             "feature_contributions": [
                 {
                     "feature": feature,
-                    "contribution": float(value),
+                    "contribution": value,
                 }
                 for feature, value in sorted_contributions
             ],
         }
+
 
 predictor = ModelPredictor()
