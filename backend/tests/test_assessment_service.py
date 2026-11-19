@@ -72,3 +72,45 @@ def test_get_assessments_orders_newest_first():
     )
     assert compiled.params["param_1"] == 5
     assert compiled.params["param_2"] == 10
+
+
+def test_get_assessments_filters_by_user():
+    from sqlalchemy.dialects import postgresql
+    from app.services.assessment_service import get_assessments
+
+    db = MagicMock()
+    db.scalars.return_value.all.return_value = []
+    user_id = uuid4()
+
+    get_assessments(db=db, user_id=user_id)
+
+    statement = db.scalars.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+
+    assert "assessments.user_id =" in str(compiled)
+    assert user_id in compiled.params.values()
+
+
+def test_get_assessment_by_id_filters_by_user():
+    from sqlalchemy.dialects import postgresql
+    from app.services.assessment_service import get_assessment_by_id
+
+    db = MagicMock()
+    assessment_id = uuid4()
+    user_id = uuid4()
+
+    get_assessment_by_id(
+        db=db,
+        assessment_id=assessment_id,
+        user_id=user_id,
+    )
+
+    statement = db.scalar.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+
+    sql = str(compiled)
+
+    assert "assessments.id =" in sql
+    assert "assessments.user_id =" in sql
+    assert assessment_id in compiled.params.values()
+    assert user_id in compiled.params.values()
